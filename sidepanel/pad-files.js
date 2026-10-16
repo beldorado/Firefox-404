@@ -10,7 +10,7 @@ export async function importSample(index, file) {
   try {
     decoded = await new OfflineAudioContext(2, 1, DECODE_RATE).decodeAudioData(await file.arrayBuffer());
   } catch {
-    throw new Error(`${file.name} isn't an audio file Chrome can read. Try WAV, MP3, OGG or FLAC.`);
+    throw new Error(`${file.name} isn't an audio file Firefox can read. Try WAV, MP3, OGG or FLAC.`);
   }
   const frames = Math.min(decoded.length, Math.round(MAX_SECONDS * decoded.sampleRate));
   const channels = Array.from({ length: Math.min(2, decoded.numberOfChannels) }, (_, ch) => decoded.getChannelData(ch).slice(0, frames));

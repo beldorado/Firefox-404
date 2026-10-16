@@ -1,3 +1,4 @@
+import './offline-shim.js';
 import { AudioEngine, sideGain } from '../engine/engine.js';
 import { loadWorklets, ctrlParams, allEffects, CTRL_COUNT } from '../effects/registry.js';
 import { nextBoundary, position, rebase } from '../shared/grid.js';
@@ -377,8 +378,8 @@ async function recordTests() {
 }
 
 function midiTests() {
-  if (!globalThis.chrome) globalThis.chrome = {};
-  if (!globalThis.chrome.storage) globalThis.chrome.storage = { local: { set() {}, get: async () => ({}) } };
+  if (!globalThis.browser) globalThis.browser = {};
+  if (!globalThis.browser.storage) globalThis.browser.storage = { local: { set() {}, get: async () => ({}) } };
   const calls = [];
   const midi = new MidiLearn({ onControl: (t, v) => calls.push(['cc', t, v]), onButton: (t, d) => calls.push(['btn', t, d]), onStatus: () => {} });
   midi.map = { 'n0:36': { kind: 'pad', index: 0 }, '0:7': { busId: 'bus1', uid: 'fx1', paramId: 'cutoff' }, '0:20': { kind: 'bus', busId: 'bus2' } };

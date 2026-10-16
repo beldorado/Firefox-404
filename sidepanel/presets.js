@@ -86,7 +86,7 @@ export function createPresets({ select, openButton, form, send, getState, flash,
 
   async function store(next) {
     try {
-      await chrome.storage.local.set({ [STORAGE_KEY]: next });
+      await browser.storage.local.set({ [STORAGE_KEY]: next });
       saved = next;
       fill();
       renderTags();
@@ -145,7 +145,7 @@ export function createPresets({ select, openButton, form, send, getState, flash,
   openButton.setAttribute('aria-expanded', 'false');
   openButton.addEventListener('click', () => (form.hidden ? open() : close()));
 
-  chrome.storage.onChanged.addListener((changes, area) => {
+  browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes[STORAGE_KEY]) return;
     saved = Array.isArray(changes[STORAGE_KEY].newValue) ? changes[STORAGE_KEY].newValue : [];
     fill();
@@ -156,7 +156,7 @@ export function createPresets({ select, openButton, form, send, getState, flash,
   });
 
   fill();
-  chrome.storage.local.get(STORAGE_KEY).then((data) => {
+  browser.storage.local.get(STORAGE_KEY).then((data) => {
     saved = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
     fill();
   });

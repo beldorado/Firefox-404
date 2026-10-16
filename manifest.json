@@ -1,24 +1,34 @@
 {
-  "manifest_version": 3,
-  "name": "Chrome-404",
+  "manifest_version": 2,
+  "name": "Firefox-404",
   "version": "0.3.0",
   "description": "SP-404-style FX buses, pads and resampling for any tab's audio.",
-  "minimum_chrome_version": "116",
-  "permissions": ["tabCapture", "offscreen", "sidePanel", "storage", "activeTab", "tabs", "contextMenus"],
-  "background": {
-    "service_worker": "background.js",
-    "type": "module"
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "firefox-404@beldorado",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
   },
-  "action": {
-    "default_title": "Chrome-404: capture this tab (Alt+Shift+4)"
+  "permissions": ["tabs", "storage", "contextMenus", "<all_urls>"],
+  "background": {
+    "page": "background/background.html"
+  },
+  "browser_action": {
+    "default_title": "Firefox-404: capture this tab (Alt+Shift+4)"
+  },
+  "sidebar_action": {
+    "default_title": "Firefox-404",
+    "default_panel": "sidepanel/sidepanel.html",
+    "open_at_install": false
   },
   "commands": {
-    "_execute_action": {
+    "_execute_browser_action": {
       "suggested_key": { "default": "Alt+Shift+4" },
       "description": "Capture the current tab"
     }
   },
-  "side_panel": {
-    "default_path": "sidepanel/sidepanel.html"
-  }
+  "web_accessible_resources": ["capture/tap-processor.js"]
 }

@@ -1,3 +1,4 @@
+import './offline-shim.js';
 import { estimateTempo } from '../shared/bpm.js';
 import { AudioEngine } from '../engine/engine.js';
 import { BOOM_BAP, FOUR_ON_FLOOR, RATE, drumLoop, rng } from './signals.js';

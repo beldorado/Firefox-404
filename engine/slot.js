@@ -1,6 +1,7 @@
 import { MIX_PARAM, createEffect } from '../effects/registry.js';
+import { fadeTo } from '../effects/lib.js';
 
-const CROSSFADE = 0.01;
+const CROSSFADE = 0.03;
 const MAX_LATENCY = 0.1;
 
 export class Slot {
@@ -89,8 +90,7 @@ export class Slot {
       [this.wet.gain, active ? Math.sin(angle) : 0]
     ];
     for (const [param, value] of targets) {
-      param.cancelScheduledValues(now);
-      param.setTargetAtTime(value, at, CROSSFADE);
+      fadeTo(param, value, now, at, CROSSFADE);
     }
   }
 }

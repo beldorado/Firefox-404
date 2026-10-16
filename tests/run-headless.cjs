@@ -6,11 +6,11 @@ const ROOT = path.resolve(__dirname, '..');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const SUITES = process.argv.slice(2).length ? process.argv.slice(2) : ['filter-smoke', 'tempo-smoke', 'fx-smoke', 'perform-smoke'];
 
-if (!process.env.PW_CORE || !process.env.CHROMIUM) {
-  console.error('Set PW_CORE (path to a playwright-core package) and CHROMIUM (path to a Chromium chrome.exe).');
+if (!process.env.PUPPETEER || !process.env.FIREFOX) {
+  console.error('Set PUPPETEER (path to a puppeteer-core package) and FIREFOX (path to firefox.exe).');
   process.exit(2);
 }
-const { chromium } = require(process.env.PW_CORE);
+const puppeteer = require(process.env.PUPPETEER);
 
 function serve() {
   const server = http.createServer((req, res) => {
@@ -27,7 +27,7 @@ function serve() {
 
 (async () => {
   const server = await serve();
-  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM, headless: true });
+  const browser = await puppeteer.launch({ browser: 'firefox', executablePath: process.env.FIREFOX, headless: true, extraPrefsFirefox: { 'media.cubeb.force_null_context': true, 'media.autoplay.default': 0 } });
   const page = await browser.newPage();
   const errors = [];
   let crash = null;
@@ -41,7 +41,7 @@ function serve() {
       crash = (e) => reject(new Error(`${suite} crashed: ${e}`));
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/tests/${suite}.html`);
-    await Promise.race([page.waitForFunction(() => window.__smoke, null, { timeout: 300000 }), crashed]);
+    await Promise.race([page.waitForFunction(() => window.__smoke, { timeout: 300000 }), crashed]);
     const result = await page.evaluate(() => window.__smoke);
     console.log(`\n== ${suite}: ${result.passed}/${result.total}`);
     for (const t of result.results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.name}  —  ${t.detail}`);

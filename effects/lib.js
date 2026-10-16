@@ -26,6 +26,19 @@ export function dbToGain(db) {
   return Math.pow(10, db / 20);
 }
 
+export function holdAt(param, time) {
+  const current = param.value;
+  param.cancelScheduledValues(time);
+  param.setValueAtTime(current, time);
+  return current;
+}
+
+export function fadeTo(param, value, now, at, length) {
+  const current = holdAt(param, now);
+  if (at > now) param.setValueAtTime(current, at);
+  param.linearRampToValueAtTime(value, at + length);
+}
+
 export function ramp(ctx, audioParam, value, immediate) {
   if (immediate) audioParam.value = value;
   else audioParam.setTargetAtTime(value, ctx.currentTime, SMOOTHING);
@@ -105,7 +118,7 @@ export function workletNode(ctx, processor, params, bpm, origin = 0) {
     },
     active(on, when = 0) {
       const param = node.parameters.get('active');
-      param.cancelScheduledValues(ctx.currentTime);
+      holdAt(param, ctx.currentTime);
       param.setValueAtTime(on ? 1 : 0, Math.max(ctx.currentTime, when));
     }
   };

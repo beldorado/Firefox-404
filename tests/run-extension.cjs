@@ -1,16 +1,68 @@
-// Loads the unpacked extension in Chromium, drives the side panel and checks the Perform view end to end.
-// Usage: PW_CORE=<playwright-core> node tests/run-extension.cjs [screenshot-dir]
+// Loads the extension in Firefox, drives the sidebar page and checks the Perform view and tab capture end to end.
+// Usage: SELENIUM=<selenium-webdriver> FIREFOX=<firefox.exe> node tests/run-extension.cjs [screenshot-dir]
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
+const { createPage } = require('./webdriver-page.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const SHOTS = process.argv[2] ? path.resolve(process.argv[2]) : null;
-if (!process.env.PW_CORE) {
-  console.error('Set PW_CORE (path to a playwright-core package with Chromium installed).');
+const ADDON_ID = 'firefox-404@beldorado';
+const UUID = '0b0e4f04-4040-4040-8404-f1aef0a40400';
+if (!process.env.SELENIUM || !process.env.FIREFOX) {
+  console.error('Set SELENIUM (path to a selenium-webdriver package) and FIREFOX (path to firefox.exe).');
   process.exit(2);
 }
-const { chromium } = require(process.env.PW_CORE);
+const selenium = require(process.env.SELENIUM);
+const firefox = require(path.join(process.env.SELENIUM, 'firefox'));
+
+function toneWav(seconds = 4, rate = 48000, frequency = 440, amplitude = 0.003) {
+  const frames = seconds * rate;
+  const data = Buffer.alloc(44 + frames * 4);
+  data.write('RIFF', 0);
+  data.writeUInt32LE(36 + frames * 4, 4);
+  data.write('WAVEfmt ', 8);
+  data.writeUInt32LE(16, 16);
+  data.writeUInt16LE(1, 20);
+  data.writeUInt16LE(2, 22);
+  data.writeUInt32LE(rate, 24);
+  data.writeUInt32LE(rate * 4, 28);
+  data.writeUInt16LE(4, 32);
+  data.writeUInt16LE(16, 34);
+  data.write('data', 36);
+  data.writeUInt32LE(frames * 4, 40);
+  for (let i = 0; i < frames; i++) {
+    const v = Math.round(amplitude * Math.sin((2 * Math.PI * frequency * i) / rate) * 32767);
+    data.writeInt16LE(v, 44 + i * 4);
+    data.writeInt16LE(v, 46 + i * 4);
+  }
+  return data;
+}
+
+function serveTone() {
+  const wav = toneWav();
+  const server = http.createServer((req, res) => {
+    if (req.url.startsWith('/tone.wav')) res.writeHead(200, { 'Content-Type': 'audio/wav' }).end(wav);
+    else res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><title>Tone page</title><audio id="a" src="/tone.wav" loop></audio>');
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+async function openPanel(driver) {
+  const before = new Set(await driver.getAllWindowHandles());
+  await driver.setContext(firefox.Context.CHROME);
+  await driver.executeScript(
+    `const win = Services.wm.getMostRecentWindow('navigator:browser');
+    win.gBrowser.selectedTab = win.gBrowser.addTab(arguments[0], { triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal() });`,
+    `moz-extension://${UUID}/sidepanel/sidepanel.html`
+  );
+  await driver.setContext(firefox.Context.CONTENT);
+  await driver.wait(async () => (await driver.getAllWindowHandles()).some((h) => !before.has(h)), 10000);
+  const handle = (await driver.getAllWindowHandles()).find((h) => !before.has(h));
+  await driver.switchTo().window(handle);
+  return handle;
+}
 
 function drumWav(bpm, bars, rate = 48000) {
   const frames = Math.round((bars * 4 * 60 * rate) / bpm);
@@ -51,26 +103,40 @@ function check(name, pass, detail = '') {
 }
 
 (async () => {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome404-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'firefox404-'));
+  const downloads = path.join(profile, 'downloads');
+  fs.mkdirSync(downloads);
   const wav = path.join(profile, 'Boom loop.wav');
   fs.writeFileSync(wav, drumWav(100, 1));
-  const context = await chromium.launchPersistentContext(profile, {
-    channel: 'chromium',
-    headless: true,
-    viewport: { width: 380, height: 1100 },
-    args: [`--disable-extensions-except=${ROOT}`, `--load-extension=${ROOT}`, '--autoplay-policy=no-user-gesture-required']
-  });
-  const errors = [];
+  const server = await serveTone();
+  const options = new firefox.Options()
+    .setBinary(process.env.FIREFOX)
+    .addArguments('-headless')
+    .setPreference('media.volume_scale', '0.0')
+    .setPreference('media.autoplay.default', 0)
+    .setPreference('media.autoplay.block-webaudio', false)
+    .setPreference('extensions.webextensions.uuids', JSON.stringify({ [ADDON_ID]: UUID }))
+    .setPreference('browser.download.folderList', 2)
+    .setPreference('browser.download.dir', downloads)
+    .setPreference('browser.download.useDownloadDir', true)
+    .setPreference('browser.download.always_ask_before_handling_new_types', false)
+    .setPreference('browser.helperApps.neverAsk.saveToDisk', 'audio/wav,audio/x-wav,audio/wave,application/octet-stream');
+  const driver = await new selenium.Builder()
+    .forBrowser('firefox')
+    .setFirefoxOptions(options)
+    .setFirefoxService(new firefox.ServiceBuilder().addArguments('--allow-system-access'))
+    .build();
+  await driver.manage().setTimeouts({ script: 60000 });
+  const page = createPage(driver, selenium, { downloads });
+  let errors = [];
   try {
-    const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
-    const id = new URL(worker.url()).host;
-    const page = await context.newPage();
-    page.on('pageerror', (e) => errors.push(String(e)));
-    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-    await page.goto(`chrome-extension://${id}/sidepanel/sidepanel.html`);
+    await driver.installAddon(ROOT, true);
+    const panelHandle = await openPanel(driver);
+    await page.setViewportSize({ width: 380, height: 1100 });
     await page.waitForFunction(() => document.querySelectorAll('.pad').length === 12 && document.querySelector('#bpm').value !== '');
+    await page.collectErrors();
     const shot = async (name) => SHOTS && page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
-    const engine = (type, payload = {}) => page.evaluate(([type, payload]) => chrome.runtime.sendMessage({ target: 'offscreen', type, ...payload }), [type, payload]);
+    const engine = (type, payload = {}) => page.evaluate(([type, payload]) => browser.runtime.sendMessage({ target: 'offscreen', type, ...payload }), [type, payload]);
 
     check('Perform view is the default', await page.evaluate(() => document.body.dataset.view === 'perform' && !document.getElementById('perform').hidden && document.getElementById('edit').hidden));
     check('Six bus FX buttons and twelve pads render, keyed Q to V', (await page.locator('.fx').count()) === 6 && (await page.locator('.pad').count()) === 12 && (await page.$$eval('.pad .pad-key', (ks) => ks.map((k) => k.textContent).join(''))) === 'QWERASDFZXCV');
@@ -390,7 +456,7 @@ function check(name, pass, detail = '') {
     await page.click('.preset-tag-delete');
     await page.click('.preset-tag-delete');
     await page.waitForFunction(() => !document.querySelector('#preset optgroup[label="Saved"]'));
-    check('Deleting a preset takes two clicks and removes it', (await page.evaluate(() => chrome.storage.local.get('userPresets'))).userPresets.length === 0);
+    check('Deleting a preset takes two clicks and removes it', (await page.evaluate(() => browser.storage.local.get('userPresets'))).userPresets.length === 0);
     await page.click('#preset-form >> text=Cancel');
     check('Cancel closes the name box', await page.evaluate(() => document.getElementById('preset-form').hidden));
     const fx2 = page.locator('.fx[data-bus="bus2"]');
@@ -419,16 +485,63 @@ function check(name, pass, detail = '') {
     await page.keyboard.press('Escape');
     check('Space is left to a control reached with Tab, but taken as tap after a mouse click', mouseFocusTaken === true && tabFocusTaken === false, `focused ${focused}; mouse-focus taken ${mouseFocusTaken}, tab-focus taken ${tabFocusTaken}`);
 
+    await page.selectOption('#preset', 'init');
+    await page.waitForFunction(() => !document.querySelector('.fx.lit'));
+    await driver.switchTo().newWindow('tab');
+    const toneHandle = await driver.getWindowHandle();
+    await driver.get(`http://127.0.0.1:${server.address().port}/tone`);
+    await driver.executeScript("document.getElementById('a').play()");
+    await driver.switchTo().window(panelHandle);
+    await page.waitForFunction(() => !document.getElementById('pending').hidden && document.querySelector('#pending-list .source-label')?.textContent === 'Tone page', null, { timeout: 15000 });
+    check('A tab that is playing shows up under Sources with a Capture button', (await page.locator('#pending-list .pending-capture').count()) === 1);
+    await page.click('#pending-list .pending-capture');
+    await page.waitForFunction(() => [...document.querySelectorAll('#sources .source-label')].some((l) => l.textContent === 'Tone page'), null, { timeout: 15000 });
+    check('Capture in the sidebar adds the tab to Sources without switching to it', await page.evaluate(() => document.getElementById('pending').hidden));
+    const toneTab = await page.evaluate(async () => (await browser.tabs.query({})).find((t) => t.title === 'Tone page').id);
+    const contentStatus = () => page.evaluate(async (id) => JSON.parse((await browser.tabs.executeScript(id, { code: 'JSON.stringify(window.firefox404Capture.status())' }))[0]), toneTab);
+    await page.waitForTimeout(1500);
+    const stream = (await engine('stream-stats')).result[toneTab];
+    const peak = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          let max = 0;
+          const listen = (m) => {
+            if (m.type === 'meter') max = Math.max(max, m.level.peak);
+          };
+          browser.runtime.onMessage.addListener(listen);
+          setTimeout(() => {
+            browser.runtime.onMessage.removeListener(listen);
+            resolve(max);
+          }, 800);
+        })
+    );
+    check('The tab’s audio reaches the engine through the worklet tap without dropouts', stream?.tap === 'worklet' && stream.underruns === 0 && peak > 0.001, `${stream?.tap}, ${stream?.bufferedMs?.toFixed(0)} ms buffered, ${stream?.underruns} underruns, peak ${peak.toFixed(4)}`);
+    check('The page now plays through Firefox-404 instead of on its own', (await contentStatus()).live === true);
+    await shot('07-captured');
+    await page.click('#sources .source-remove');
+    await page.waitForFunction(() => !document.querySelector('#sources .source'));
+    check('Removing the source gives the page its own audio back', (await contentStatus()).live === false);
+    await engine('capture-tab', { tabId: toneTab });
+    await page.waitForFunction(() => document.querySelectorAll('#sources .source').length === 1, null, { timeout: 15000 });
+    check('The same tab can be captured again', (await contentStatus()).live === true);
+    await driver.switchTo().window(toneHandle);
+    await driver.close();
+    await driver.switchTo().window(panelHandle);
+    await page.waitForFunction(() => !document.querySelector('#sources .source'), null, { timeout: 15000 });
+    check('Closing a captured tab removes its source', true);
+
     await page.setViewportSize({ width: 320, height: 1100 });
     await shot('05-narrow');
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+    const overflow = await page.evaluate(() => document.body.scrollWidth > document.body.clientWidth || document.body.getBoundingClientRect().right > document.documentElement.getBoundingClientRect().right + 0.5);
     check('Nothing overflows horizontally at 320 px', !overflow);
   } catch (err) {
     check('Runner crashed', false, err.stack);
   } finally {
-    const benign = errors.filter((e) => !/Receiving end does not exist/.test(e));
+    errors = await page.errors().catch(() => []);
+    const benign = errors.filter((e) => !/Receiving end does not exist|Could not establish connection/.test(e));
     check('No page errors', benign.length === 0, benign.join(' | '));
-    await context.close();
+    await driver.quit();
+    server.close();
     const failed = results.filter((r) => !r.pass).length;
     console.log(`\n== extension: ${results.length - failed}/${results.length}`);
     process.exitCode = failed ? 1 : 0;

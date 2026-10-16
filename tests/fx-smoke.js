@@ -1,3 +1,4 @@
+import './offline-shim.js';
 import { AudioEngine } from '../engine/engine.js';
 import { allEffects, loadWorklets } from '../effects/registry.js';
 import { BOOM_BAP, RATE, drumLoop, sineBuffer } from './signals.js';

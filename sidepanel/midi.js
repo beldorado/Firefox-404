@@ -52,12 +52,12 @@ export class MidiLearn {
       this.onStatus(`MIDI unavailable: ${err.message}`);
       return false;
     }
-    const stored = await chrome.storage.local.get([STORAGE_KEY, LAYOUT_KEY]);
+    const stored = await browser.storage.local.get([STORAGE_KEY, LAYOUT_KEY]);
     this.map = stored[STORAGE_KEY] ?? {};
     const layout = stored[LAYOUT_KEY] ?? LEGACY_PADS_PER_BANK;
     if (layout !== PADS_PER_BANK) {
       this.map = migrateMidiMap(this.map, layout);
-      chrome.storage.local.set({ [STORAGE_KEY]: this.map, [LAYOUT_KEY]: PADS_PER_BANK });
+      browser.storage.local.set({ [STORAGE_KEY]: this.map, [LAYOUT_KEY]: PADS_PER_BANK });
     }
     const attach = () => {
       for (const input of this.access.inputs.values()) input.onmidimessage = (e) => this.handle(e.data);
@@ -80,7 +80,7 @@ export class MidiLearn {
 
   learn(key, label) {
     this.map[key] = this.target;
-    chrome.storage.local.set({ [STORAGE_KEY]: this.map, [LAYOUT_KEY]: PADS_PER_BANK });
+    browser.storage.local.set({ [STORAGE_KEY]: this.map, [LAYOUT_KEY]: PADS_PER_BANK });
     this.onStatus(`${label} → ${describe(this.target)}`, 'info');
     this.target = null;
   }

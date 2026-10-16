@@ -47,7 +47,7 @@ function showStatus(message, kind = 'error') {
 
 async function send(type, payload = {}) {
   try {
-    const response = await chrome.runtime.sendMessage({ target: TARGET.OFFSCREEN, type, ...payload });
+    const response = await browser.runtime.sendMessage({ target: TARGET.OFFSCREEN, type, ...payload });
     if (!response?.ok) throw new Error(response?.error ?? 'Engine did not respond');
     setState(response.result);
     return response.result;
@@ -191,6 +191,7 @@ function renderPending() {
         'li',
         { className: 'pending-item' },
         h('span', { className: 'source-label', title: p.title, textContent: p.title }),
+        h('button', { type: 'button', className: 'pending-capture', title: 'Send this tab through Firefox-404', textContent: 'Capture', onclick: () => send(MSG.CAPTURE_TAB, { tabId: p.tabId }) }),
         h('button', { type: 'button', title: 'Switch to this tab', textContent: 'Go', onclick: () => goToTab(p) })
       )
     )
@@ -199,8 +200,8 @@ function renderPending() {
 }
 
 async function goToTab({ tabId, windowId }) {
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.windows.update(windowId, { focused: true });
+  await browser.tabs.update(tabId, { active: true });
+  await browser.windows.update(windowId, { focused: true });
 }
 
 function bindAddBar() {
@@ -676,7 +677,7 @@ function bindControls() {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message) => {
   if (message.target !== TARGET.BROADCAST) return false;
   if (message.type === MSG.STATE) setState(message.state);
   else if (message.type === MSG.METER) {
@@ -687,8 +688,8 @@ chrome.runtime.onMessage.addListener((message) => {
   return false;
 });
 
-chrome.storage.session.onChanged.addListener((changes) => {
-  if (changes.lastError?.newValue) showStatus(changes.lastError.newValue.message);
+browser.storage.session.onChanged.addListener((changes) => {
+  if (changes.lastError?.newValue) showStatus(changes.lastError.newValue.message, changes.lastError.newValue.kind);
   if (changes.pendingTabs) {
     pending = changes.pendingTabs.newValue ?? [];
     renderPending();
@@ -697,11 +698,11 @@ chrome.storage.session.onChanged.addListener((changes) => {
 
 async function init() {
   bindControls();
-  const engine = await chrome.runtime.sendMessage({ target: TARGET.BACKGROUND, type: MSG.ENSURE_ENGINE }).catch((err) => ({ ok: false, error: err.message }));
+  const engine = await browser.runtime.sendMessage({ target: TARGET.BACKGROUND, type: MSG.ENSURE_ENGINE }).catch((err) => ({ ok: false, error: err.message }));
   if (!engine?.ok) showStatus(`Engine failed to start: ${engine?.error}`);
   await send(MSG.GET_STATE);
-  const { lastError, pendingTabs } = await chrome.storage.session.get(['lastError', 'pendingTabs']);
-  if (lastError) showStatus(lastError.message);
+  const { lastError, pendingTabs } = await browser.storage.session.get(['lastError', 'pendingTabs']);
+  if (lastError) showStatus(lastError.message, lastError.kind);
   pending = pendingTabs ?? [];
   renderPending();
 }

@@ -1,3 +1,4 @@
+import './offline-shim.js';
 import { AudioEngine } from '../engine/engine.js';
 import { PRESETS } from '../engine/presets.js';
 import { listEffects, loadWorklets } from '../effects/registry.js';

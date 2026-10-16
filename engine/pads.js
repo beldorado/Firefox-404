@@ -1,4 +1,5 @@
 import { PAD_COUNT } from '../shared/state.js';
+import { fadeTo } from '../effects/lib.js';
 
 const RELEASE = 0.006;
 const PEAK_BINS = 48;
@@ -81,8 +82,7 @@ export class PadBank {
       voice.source.stop();
       return true;
     }
-    voice.gain.gain.cancelScheduledValues(at);
-    voice.gain.gain.setTargetAtTime(0, at, RELEASE);
+    fadeTo(voice.gain.gain, 0, at, at, RELEASE * 4);
     try {
       voice.source.stop(at + RELEASE * 8);
     } catch {}

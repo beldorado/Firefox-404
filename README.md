@@ -1,14 +1,26 @@
-# Chrome-404
+# Firefox-404
 
-SP-404 MK2-style effect buses, pads and resampling for any tab's audio. A Chrome extension (Manifest V3, Chrome 116+), plain ES modules, no build step.
+SP-404 MK2-style effect buses, pads and resampling for any tab's audio. A Firefox add-on (Firefox 142+), plain ES modules, no build step. It's the Firefox version of [Chrome-404](https://github.com/beldorado/Chrome-404).
 
 ## Install
 
-1. Clone this repo (`git clone https://github.com/beldorado/Chrome-404.git`), or download it as a ZIP from GitHub and unzip it.
-2. Open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and pick the `Chrome-404` folder.
-3. On a tab that's playing audio, click the Chrome-404 icon, press Alt+Shift+4, or right-click the page and choose **Capture this tab in Chrome-404**. The side panel opens and the tab's audio runs through the engine.
+1. Clone this repo (`git clone https://github.com/beldorado/Firefox-404.git`), or download it as a ZIP from GitHub and unzip it.
+2. Open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on…** and pick `manifest.json` in the `Firefox-404` folder.
+3. On a tab that's playing audio, click the Firefox-404 icon, press Alt+Shift+4, or right-click the page and choose **Capture this tab in Firefox-404**. The sidebar opens and the tab's audio runs through the engine.
 
-You can capture several tabs. Chrome needs you to do this once per tab, so tabs that are playing but not captured yet are listed under Sources with a link to each one.
+A temporary add-on stays until Firefox restarts, and your pads, presets and settings are kept between loads. Release Firefox only installs signed add-ons for good. To keep it installed, either sign it for yourself on [addons.mozilla.org](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/) (`web-ext sign --channel=unlisted`) or use Firefox Developer Edition or Nightly with `xpinstall.signatures.required` set to false in `about:config`.
+
+You can capture several tabs. Tabs that are playing but not captured yet are listed under Sources with a **Capture** button, so you don't have to switch to them.
+
+### How capture works in Firefox
+
+Firefox has no tab-capture API, so Firefox-404 takes the audio from the page's `<audio>` and `<video>` players instead. While a tab is captured, its players play through Firefox-404 and not directly to your speakers. Remove the source (✕) and the page plays on its own again.
+
+- Works with ordinary web players such as YouTube, SoundCloud and Bandcamp.
+- DRM-protected playback (Spotify's web player, Netflix and the like) can't be captured, and Firefox gives silence.
+- Sound a page makes with Web Audio rather than a player element, and players from another site that don't allow it (no CORS), aren't heard.
+- Tab audio arrives about 75 ms later than it would in Chrome-404, from the stream that carries it to the engine. Pads and effects aren't delayed.
+- If Firefox hasn't let the page make sound yet, Firefox-404 asks you to click anywhere on that page once.
 
 ## Perform view
 
@@ -68,8 +80,8 @@ Keys 1–6 are the bus FX buttons. The pads are the 4×3 block Q W E R / A S D F
 
 | Path | What |
 |---|---|
-| `background.js` | Service worker: capture, offscreen document, settings storage |
-| `offscreen/` | Hosts the `AudioContext` and engine, routes messages, stores pads in IndexedDB |
+| `background/` | Persistent background page: hosts the `AudioContext` and engine, captures tabs, routes messages, stores settings and pads |
+| `capture/` | Content script that takes a tab's audio and streams it to the engine, and its tap worklet |
 | `engine/` | `AudioEngine`, buses, slots, pads, tempo detection, recorder |
 | `effects/` | Effect definitions, `registry.js` (CTRL knobs, quantized effects), AudioWorklets |
 | `shared/` | State shape, messages, beat grid, params, LFO, tempo and hit detection, chopping, WAV, pad storage |
@@ -81,15 +93,15 @@ Keys 1–6 are the bus FX buttons. The pads are the 4×3 block Q W E R / A S D F
 The audio suites render the engine offline in a browser and check the output signal:
 
 ```sh
-PW_CORE=<path to playwright-core> CHROMIUM=<path to chrome.exe> node tests/run-headless.cjs
+PUPPETEER=<path to puppeteer-core> FIREFOX=<path to firefox.exe> node tests/run-headless.cjs
 ```
 
 This runs `filter-smoke`, `tempo-smoke`, `fx-smoke` and `perform-smoke`. Pass suite names to run a subset.
 
-The end-to-end suite loads the unpacked extension and drives the side panel. It needs Playwright's own Chromium, because branded Chrome won't load unpacked extensions from the command line (`node <playwright-core>/cli.js install chromium`):
+The end-to-end suite installs the add-on in headless Firefox through Selenium and geckodriver (Selenium fetches geckodriver itself), drives the sidebar page and captures a local test page. Test audio goes to your sound device with Firefox's output volume at zero, and the test tone is very quiet:
 
 ```sh
-PW_CORE=<path to playwright-core> node tests/run-extension.cjs [screenshot-dir]
+SELENIUM=<path to selenium-webdriver> FIREFOX=<path to firefox.exe> node tests/run-extension.cjs [screenshot-dir]
 ```
 
 ## License

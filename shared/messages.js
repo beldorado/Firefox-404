@@ -7,11 +7,11 @@ export const TARGET = {
 export const MSG = {
   ENSURE_ENGINE: 'ensure-engine',
   SET_AUTO_BPM: 'set-auto-bpm',
-  ENGINE_READY: 'engine-ready',
   GET_STATE: 'get-state',
   STATE: 'state',
   METER: 'meter',
-  ADD_TAB_SOURCE: 'add-tab-source',
+  CAPTURE_TAB: 'capture-tab',
+  STREAM_STATS: 'stream-stats',
   REMOVE_SOURCE: 'remove-source',
   UPDATE_SOURCE: 'update-source',
   ADD_SLOT: 'add-slot',
