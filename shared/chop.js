@@ -1,5 +1,3 @@
-import { divisionBeats } from './sync.js';
-
 export const SLICE_FADE_SECONDS = 0.002;
 export const MIN_SLICE_SECONDS = 0.02;
 
@@ -29,12 +27,8 @@ export function crossingBefore(data, frame, radius) {
   return at;
 }
 
-export function snapTime(time, { bpm = null, division = '1/16', data = null, sampleRate = 48000, grid = true } = {}) {
-  if (grid && bpm) {
-    const step = (divisionBeats(division, 0.25) * 60) / bpm;
-    return Math.round(time / step) * step;
-  }
-  if (data) return zeroCrossing(data, time * sampleRate, Math.round(ZERO_SEARCH_SECONDS * sampleRate)) / sampleRate;
+export function snapTime(time, { data = null, sampleRate = 48000, zero = true } = {}) {
+  if (zero && data) return zeroCrossing(data, time * sampleRate, Math.round(ZERO_SEARCH_SECONDS * sampleRate)) / sampleRate;
   return time;
 }
 
@@ -97,6 +91,20 @@ export function detectTransients(channels, sampleRate, { start = 0, end = channe
     start,
     end
   );
+}
+
+// Cuts a stored pad record down to start–end for good. No fades, so it sounds exactly like the trimmed pad did.
+export function truncateClip(record, start, end, chops = []) {
+  const length = end - start;
+  const named = /^(?:[\d.]+ s|\d+ bars?) at (\d+) BPM$/.exec(record.name ?? '');
+  return {
+    ...record,
+    name: named ? `${length.toFixed(1)} s at ${named[1]} BPM` : record.name,
+    channels: extractSlice(record.channels, record.sampleRate, start, end, 0),
+    start: 0,
+    end: null,
+    chops: cleanChops(chops.map((t) => t - start), 0, length)
+  };
 }
 
 export function extractSlice(channels, sampleRate, start, end, fade = SLICE_FADE_SECONDS) {

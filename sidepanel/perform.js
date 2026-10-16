@@ -186,8 +186,11 @@ export function createPerform({ root, send, getState, flash, armLearn, showStatu
     svg.setAttribute('preserveAspectRatio', 'none');
     svg.setAttribute('aria-hidden', 'true');
     svg.classList.add('pad-wave');
+    // Faint peaks behind, RMS (how loud it sounds) in front.
+    const peakPath = document.createElementNS(SVG, 'path');
+    peakPath.classList.add('wave-peak');
     const path = document.createElementNS(SVG, 'path');
-    svg.append(path);
+    svg.append(peakPath, path);
     const name = h('span', { className: 'pad-name' });
     const num = h('span', { className: 'pad-num', 'aria-hidden': 'true' });
     const group = h('span', { className: 'pad-group', 'aria-hidden': 'true' });
@@ -236,7 +239,7 @@ export function createPerform({ root, send, getState, flash, armLearn, showStatu
       const file = e.dataTransfer.files[0];
       if (file) loadFile(at(), file);
     });
-    return { el, path, name, num, group, peaksKey: '' };
+    return { el, path, peakPath, name, num, group, peaksKey: '' };
   });
 
   const padRoute = h('div', { className: 'pad-route' });
@@ -756,10 +759,11 @@ export function createPerform({ root, send, getState, flash, armLearn, showStatu
       const i = bankIndex * PADS_PER_BANK + slotIndex;
       const pad = state.pads[i];
       p.num.textContent = padLabel(i);
-      const peaksKey = pad.clip ? pad.clip.peaks.join() : '';
+      const peaksKey = pad.clip ? `${pad.clip.peaks.join()}|${pad.clip.rms?.join()}` : '';
       if (peaksKey !== p.peaksKey) {
         p.peaksKey = peaksKey;
-        p.path.setAttribute('d', pad.clip ? wavePath(pad.clip.peaks) : '');
+        p.peakPath.setAttribute('d', pad.clip ? wavePath(pad.clip.peaks) : '');
+        p.path.setAttribute('d', pad.clip?.rms ? wavePath(pad.clip.rms) : '');
       }
       p.name.textContent = pad.clip ? pad.clip.name : '';
       p.group.textContent = pad.choke ? `G${pad.choke}` : '';
@@ -807,6 +811,7 @@ export function createPerform({ root, send, getState, flash, armLearn, showStatu
     transport = next;
     const state = getState();
     if (state) updateRec(state);
+    editor.followPad(next?.pads?.[editor.editing()] ?? null);
     const beat = next ? Math.floor(next.beat) : null;
     if (beat !== lastBeat) {
       lastBeat = beat;

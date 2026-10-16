@@ -320,6 +320,16 @@ function check(name, pass, detail = '') {
     check('Dragging S trims the start without changing the audio', Math.abs(trimmed.start - 0.45) < 0.02 && trimmed.end === trimmed.duration, `start ${trimmed.start.toFixed(3)} s of ${trimmed.duration.toFixed(3)} s`);
     check('Trimming drops the chop that falls before the new start', /4 slices/.test(await page.textContent('.editor-readout')), await page.textContent('.editor-readout'));
 
+    await page.click('.editor >> text=Truncate');
+    await page.click('.editor >> text=Cut for good?');
+    await page.waitForFunction(() => /Start 0\.000/.test(document.querySelector('.editor-readout').textContent) && /4 slices/.test(document.querySelector('.editor-readout').textContent), null, { timeout: 5000 }).catch(() => {});
+    const cutClip = (await engine('get-state')).result.pads[2].clip;
+    check(
+      'Truncate cuts the sample to S–E for good and keeps the chops',
+      Math.abs(cutClip.duration - (trimmed.duration - trimmed.start)) < 0.002 && cutClip.start === 0 && cutClip.end === cutClip.duration && /4 slices/.test(await page.textContent('.editor-readout')) && (await page.evaluate(() => [...document.querySelectorAll('.editor-head .key')].find((b) => b.textContent === 'Truncate')?.disabled)),
+      `${cutClip.duration.toFixed(3)} s, ${await page.textContent('.editor-readout')}`
+    );
+
     await page.click('.editor >> text=Done');
     check('Done closes the editor and brings back the pad details', await page.evaluate(() => document.querySelector('.editor').hidden && !document.querySelector('.pad-detail').hidden));
 

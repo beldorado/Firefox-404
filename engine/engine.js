@@ -1,5 +1,5 @@
 import { Bus } from './bus.js';
-import { PadBank, peaksOf } from './pads.js';
+import { PadBank, waveOf } from './pads.js';
 import { TempoDetector } from './tempo-detector.js';
 import {
   BUS_IDS,
@@ -483,7 +483,7 @@ export class AudioEngine {
     this.pads.setBuffer(index, buffer);
     pad.playing = false;
     const region = this.region(buffer.duration, start, end);
-    pad.clip = { name: String(name), bpm: Number(bpm) > 0 ? Number(bpm) : null, duration: buffer.duration, ...region, peaks: peaksOf(buffer, undefined, region.start, region.end) };
+    pad.clip = { name: String(name), bpm: Number(bpm) > 0 ? Number(bpm) : null, duration: buffer.duration, ...region, ...waveOf(buffer, undefined, region.start, region.end) };
     this.emit();
   }
 
@@ -492,7 +492,7 @@ export class AudioEngine {
     const buffer = this.pads.buffers[index];
     if (!pad?.clip || !buffer) return;
     Object.assign(pad.clip, this.region(buffer.duration, start, end));
-    pad.clip.peaks = peaksOf(buffer, undefined, pad.clip.start, pad.clip.end);
+    Object.assign(pad.clip, waveOf(buffer, undefined, pad.clip.start, pad.clip.end));
     this.pads.setLoop(index, pad.clip.start, pad.clip.end - pad.clip.start);
     this.emit();
   }
@@ -534,6 +534,8 @@ export class AudioEngine {
     const buffer = this.pads.buffers[index];
     if (!buffer) return false;
     const region = this.region(buffer.duration, start, end);
+    // One voice per pad: hearing it in the editor takes over from the pad.
+    this.stopPad(index);
     return this.pads.preview(index, { offset: region.start, duration: region.end - region.start });
   }
 
@@ -593,6 +595,7 @@ export class AudioEngine {
     const quantize = this.state.quantize;
     const when = loop && quantize !== 'Off' ? nextBoundary(this.ctx.currentTime, this.origin, this.state.bpm, quantize) : 0;
     this.chokeOthers(index, when);
+    if (this.pads.previewOf === index) this.stopPreview();
     pad.playing = this.pads.start(index, { loop, when, rate: this.padRate(index), level: pad.level, offset: pad.clip.start, duration: pad.clip.end - pad.clip.start });
     this.emit();
   }
@@ -685,8 +688,19 @@ export class AudioEngine {
     const rec = this.state.recording;
     return {
       beat: this.beat(now),
-      rec: rec ? { pad: rec.pad, armed: now < rec.start, elapsed: Math.max(0, now - rec.start), total: rec.end === null ? null : rec.end - rec.start } : null
+      rec: rec ? { pad: rec.pad, armed: now < rec.start, elapsed: Math.max(0, now - rec.start), total: rec.end === null ? null : rec.end - rec.start } : null,
+      pads: this.padHeads(now)
     };
+  }
+
+  padHeads(now) {
+    const heard = now - (this.ctx.outputLatency || 0) - (this.ctx.baseLatency || 0);
+    const heads = {};
+    this.state.pads.forEach((pad, i) => {
+      const head = pad.playing ? this.pads.head(i, heard) : null;
+      if (head) heads[i] = head;
+    });
+    return heads;
   }
 
   static slotsFromSaved(bus) {

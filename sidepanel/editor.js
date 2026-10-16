@@ -1,20 +1,21 @@
 import { cssVar, h, hiDpiCanvas } from './dom.js';
 import { MSG } from '../shared/messages.js';
 import { padLabel } from '../shared/state.js';
-import { cleanChops, detectTransients, equalChops, extractSlice, mono, slicesFrom, snapTime, MIN_SLICE_SECONDS } from '../shared/chop.js';
+import { cleanChops, detectTransients, equalChops, extractSlice, mono, slicesFrom, snapTime, truncateClip, MIN_SLICE_SECONDS } from '../shared/chop.js';
 import { getClip, putClip } from '../shared/pad-store.js';
 import { clamp } from '../shared/params.js';
+import { confirmButton } from './widgets.js';
 
 const HIT_PX = 7;
 const SAVE_DELAY_MS = 300;
 const LOAD_TRIES = 10;
 const SPLITS = [2, 4, 8, 16];
 const SENSITIVITY = { Fewer: 0.25, Normal: 0.5, More: 0.8 };
-const SNAP_DIVISION = '1/16';
 const ZOOM_RATE = 0.0015;
 const AMP_RATE = 0.002;
 const MAX_GAIN = 32;
 const MIN_VIEW_FRAMES = 128;
+const PAD_HEAD_STALE_S = 0.3;
 
 const fmt = (t) => `${t.toFixed(3)} s`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,6 +40,8 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
   let drag = null;
   let columns = null;
   let playhead = null;
+  let padHead = null;
+  let padPlaying = false;
   let raf = 0;
   let saveTimer = null;
   let sensitivity = 'Normal';
@@ -59,8 +62,8 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
   const overview = h('div', { className: 'wave-overview', hidden: true, title: 'Drag to move through the sample', 'aria-hidden': 'true' }, thumb);
   const title = h('p', { className: 'editor-title' });
   const readout = h('div', { className: 'editor-readout', 'aria-live': 'polite' });
-  const snap = h('input', { type: 'checkbox', checked: true, onchange: () => draw() });
-  const snapLabel = h('label', { className: 'check', title: `Snap chops and trim points to the ${SNAP_DIVISION} grid. Without it they snap to the nearest zero crossing.` }, snap, ` Snap to ${SNAP_DIVISION}`);
+  const snap = h('input', { type: 'checkbox', checked: true });
+  const snapLabel = h('label', { className: 'check', title: 'Move chops and trim points to the nearest point where the waveform crosses zero, so slices start and end without a click. Turn it off to place them exactly.' }, snap, ' Snap to zero crossings');
   const play = h('button', { type: 'button', className: 'key key-small', textContent: 'Play', onclick: () => togglePlay() });
   const chopKey = h('button', { type: 'button', className: 'key key-small', textContent: 'Chop (G)', title: 'While it plays, drop a chop where you hear it', onclick: () => chopAtPlayhead() });
   const split = h(
@@ -93,12 +96,17 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
   const clearChops = h('button', { type: 'button', className: 'key key-small', textContent: 'Clear chops', onclick: () => setChops([], 'Chops cleared') });
   const resetTrim = h('button', { type: 'button', className: 'key key-small', textContent: 'Reset trim', onclick: () => setRegion(0, duration, true) });
   const toPads = h('button', { type: 'button', className: 'key key-small key-go', onclick: () => sendSlices() });
+  const truncate = confirmButton(h('button', { type: 'button', className: 'key key-small', title: 'Cut the sample down to S–E for good. Chops are kept. This can’t be undone.' }), {
+    label: 'Truncate',
+    confirmLabel: 'Cut for good?',
+    onConfirm: () => truncateToTrim()
+  });
   const done = h('button', { type: 'button', className: 'key key-small', textContent: 'Done', onclick: () => close() });
 
   const el = h(
     'div',
     { className: 'editor', hidden: true },
-    h('div', { className: 'editor-head' }, title, resetTrim, done),
+    h('div', { className: 'editor-head' }, title, resetTrim, truncate, done),
     canvas,
     overview,
     readout,
@@ -115,7 +123,7 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
   const bpm = () => getState()?.pads[index]?.clip?.bpm ?? null;
 
   function snapped(t) {
-    return clamp(snapTime(t, { bpm: bpm(), division: SNAP_DIVISION, data, sampleRate: record.sampleRate, grid: snap.checked && Boolean(bpm()) }), 0, duration);
+    return clamp(snapTime(t, { data, sampleRate: record.sampleRate, zero: snap.checked }), 0, duration);
   }
 
   function buildColumns(w) {
@@ -222,9 +230,10 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
       ctx.fillStyle = '#050607';
       ctx.fillText(label, left ? x - 11 : x + 4, hgt - 12);
     }
-    if (playhead) {
+    const at = head();
+    if (at !== null) {
       ctx.fillStyle = '#f0533f';
-      ctx.fillRect(Math.round(xOf(position(), w)), 0, 2, hgt);
+      ctx.fillRect(Math.round(xOf(at, w)), 0, 2, hgt);
     }
     if (gain > 1) {
       const label = `Amp ${gain.toFixed(1)}×`;
@@ -242,21 +251,40 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
     return clamp(playhead.offset + Math.max(0, (performance.now() - playhead.t0) / 1000 - latency), playhead.offset, playhead.offset + playhead.duration);
   }
 
+  // Where the pad itself is playing, carried forward from the last meter reading.
+  function padPosition() {
+    if (!padHead) return null;
+    const elapsed = (performance.now() - padHead.t0) / 1000;
+    if (elapsed > PAD_HEAD_STALE_S) return null;
+    const { at, rate, start: from, end: to, loop } = padHead;
+    const t = at + elapsed * rate;
+    if (!loop) return Math.min(t, to);
+    return t < to ? t : from + ((t - from) % (to - from));
+  }
+
+  function head() {
+    return playhead ? position() : padPosition();
+  }
+
   function animate() {
     cancelAnimationFrame(raf);
     const tick = () => {
-      if (!playhead) return;
       const latency = getState()?.latency ?? 0;
-      if ((performance.now() - playhead.t0) / 1000 > playhead.duration + latency) {
+      if (playhead && (performance.now() - playhead.t0) / 1000 > playhead.duration + latency) {
         playhead = null;
         play.textContent = 'Play';
-        draw();
-        return;
       }
       draw();
-      raf = requestAnimationFrame(tick);
+      raf = playhead || padPosition() !== null ? requestAnimationFrame(tick) : 0;
     };
     raf = requestAnimationFrame(tick);
+  }
+
+  function followPad(next) {
+    const was = padHead;
+    padHead = next && record ? { ...next, t0: performance.now() } : null;
+    if (padHead && !raf) animate();
+    else if (was && !padHead && !playhead) draw();
   }
 
   function audition(from, to) {
@@ -290,9 +318,23 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
     toPads.disabled = slices.length < 2;
     clearChops.disabled = chops.length === 0;
     resetTrim.disabled = start === 0 && end === duration;
-    const tempo = bpm();
-    snap.disabled = !tempo;
-    snapLabel.title = tempo ? `Snap chops and trim points to the ${SNAP_DIVISION} grid at ${Math.round(tempo)} BPM. Without it they snap to the nearest zero crossing.` : 'This sample has no BPM, so chops snap to the nearest zero crossing.';
+    truncate.disabled = resetTrim.disabled;
+  }
+
+  async function truncateToTrim() {
+    if (!record || (start === 0 && end === duration)) return;
+    clearTimeout(saveTimer);
+    stopPlay();
+    const target = index;
+    const length = end - start;
+    const next = truncateClip(record, start, end, chops);
+    try {
+      await putClip(next);
+      await send(MSG.PAD_STORED, { index: target });
+      showStatus(`Truncated ${padLabel(target)} to ${fmt(length)}.`, 'info');
+    } catch (err) {
+      showStatus(`Couldn't truncate the sample: ${err.message}`);
+    }
   }
 
   function persist() {
@@ -327,11 +369,12 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
 
   function chopAtPlayhead() {
     if (!record) return false;
-    if (!playhead) {
-      showStatus('Press Play first, then tap G on each hit you want to cut at.', 'info');
+    const at = head();
+    if (at === null) {
+      showStatus('Press Play (or play the pad) first, then tap G on each hit you want to cut at.', 'info');
       return true;
     }
-    const t = snapped(position());
+    const t = snapped(at);
     if (t <= start || t >= end) return true;
     setChops([...chops, t]);
     flash('Chop', `${slicesFrom(start, end, chops).length} slices`);
@@ -547,6 +590,8 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
 
   function open(next) {
     stopPlay();
+    padHead = null;
+    padPlaying = Boolean(getState()?.pads[next]?.playing);
     index = next;
     record = null;
     data = null;
@@ -561,6 +606,8 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
     if (index === null) return;
     stopPlay();
     cancelAnimationFrame(raf);
+    raf = 0;
+    padHead = null;
     index = null;
     record = null;
     data = null;
@@ -577,6 +624,10 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
     }
     const key = JSON.stringify([clip.name, clip.duration]);
     if (key !== clipKey) open(index);
+    // Pressing the pad stops the editor's preview in the engine, so follow the pad from here.
+    const playing = Boolean(state.pads[index].playing);
+    if (playing && !padPlaying) halt();
+    padPlaying = playing;
   }
 
   function halt() {
@@ -586,5 +637,5 @@ export function createEditor({ send, getState, showStatus, flash, onSlicesSent =
     draw();
   }
 
-  return { el, open, close, update, chopAtPlayhead, halt, isOpen: () => index !== null, editing: () => index };
+  return { el, open, close, update, chopAtPlayhead, halt, followPad, isOpen: () => index !== null, editing: () => index };
 }

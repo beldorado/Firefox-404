@@ -7,7 +7,7 @@ import { MidiLearn } from '../sidepanel/midi.js';
 import { HoldKeys, actionFor } from '../sidepanel/keys.js';
 import { PRESETS } from '../engine/presets.js';
 import { FOUR_ON_FLOOR, RATE, drumLoop, sineBuffer } from './signals.js';
-import { cleanChops, detectTransients, equalChops, extractSlice, slicesFrom, snapTime } from '../shared/chop.js';
+import { cleanChops, detectTransients, equalChops, extractSlice, slicesFrom, snapTime, truncateClip } from '../shared/chop.js';
 import { PAD_COUNT, PADS_PER_BANK, migratePadIndex, padLabel, presetFrom } from '../shared/state.js';
 import { getAllClips, padMoves } from '../shared/pad-store.js';
 import { migrateMidiMap } from '../sidepanel/midi.js';
@@ -317,6 +317,15 @@ async function padTests() {
   check('Clearing a pad BPM turns Follow BPM off', synced.engine.state.pads[1].clip.bpm === null && synced.engine.padRate(1) === 1, `bpm ${synced.engine.state.pads[1].clip.bpm}`);
   synced.engine.updatePad(0, { sync: false });
   check('Peaks are computed for the pad display', synced.engine.state.pads[0].clip.peaks.length === 48 && synced.engine.state.pads[0].clip.peaks.every((p) => p >= 0 && p <= 1), `${synced.engine.state.pads[0].clip.peaks.length} bins`);
+  const wide = synced.ctx.createBuffer(2, RATE, RATE);
+  wide.getChannelData(0).forEach((_, i, d) => (d[i] = 0.8 * Math.sin((2 * Math.PI * 440 * i) / RATE)));
+  synced.engine.setPadClip(2, wide, { name: 'left only' });
+  const { peaks, rms: body } = synced.engine.state.pads[2].clip;
+  check(
+    'The pad display measures the mono mix like the editor: peak and RMS of (L+R)/2',
+    body.length === 48 && peaks.every((p) => near(p, 0.4, 0.011)) && body.every((r) => near(r, 0.28, 0.011)),
+    `peak ${peaks[10]}, rms ${body[10]}`
+  );
 }
 
 async function waitFor(fn, ms = 2000) {
@@ -454,12 +463,21 @@ async function chopTests() {
   check('Chops outside the trim or too close together are dropped', cleanChops([0.005, 0.5, 0.51, 1.2, 1.99, 3], 0, 2).join() === '0.5,1.2', cleanChops([0.005, 0.5, 0.51, 1.2, 1.99, 3], 0, 2).join());
   const slices = slicesFrom(0.25, 2, [1, 0.5]);
   check('Slices run between trim points and sorted chops', JSON.stringify(slices) === JSON.stringify([{ start: 0.25, end: 0.5 }, { start: 0.5, end: 1 }, { start: 1, end: 2 }]), JSON.stringify(slices));
-  check('Grid snap at 120 BPM rounds to the nearest 1/16 (0.125 s)', snapTime(0.3, { bpm: 120 }) === 0.25 && snapTime(0.33, { bpm: 120 }) === 0.375, `${snapTime(0.3, { bpm: 120 })}, ${snapTime(0.33, { bpm: 120 })}`);
   const wave = new Float32Array(4800).map((_, i) => Math.sin((2 * Math.PI * 100 * i) / RATE));
-  const z = snapTime(0.0049, { data: wave, sampleRate: RATE, grid: false });
-  check('Without a BPM, chops snap to the nearest zero crossing', Math.abs(z - 0.005) < 1 / RATE + 1e-9, `${(z * 1000).toFixed(3)} ms`);
+  const z = snapTime(0.0049, { data: wave, sampleRate: RATE });
+  check('Chops snap to the nearest zero crossing', Math.abs(z - 0.005) < 1 / RATE + 1e-9, `${(z * 1000).toFixed(3)} ms`);
+  check('With snap off, chops stay exactly where they are put', snapTime(0.0049, { data: wave, sampleRate: RATE, zero: false }) === 0.0049, `${snapTime(0.0049, { data: wave, sampleRate: RATE, zero: false })}`);
   const cut = extractSlice([new Float32Array(1000).fill(1)], 1000, 0.1, 0.5, 0.01);
   check('Extracted slices have the right length and fade in and out', cut[0].length === 400 && cut[0][0] === 0 && cut[0][399] === 0 && cut[0][200] === 1, `${cut[0].length} frames`);
+  const ramp = new Float32Array(1000).map((_, i) => i / 1000);
+  const recorded = { index: 0, name: '16.5 s at 124 BPM', bpm: 124, sampleRate: 1000, channels: [ramp, ramp], start: 0.1, end: 0.5, chops: [0.2, 0.3] };
+  const truncated = truncateClip(recorded, 0.1, 0.5, recorded.chops);
+  check(
+    'Truncate keeps only start–end with no fades, shifts chops and renames an auto-named clip',
+    truncated.channels[0].length === 400 && truncated.channels[1].length === 400 && truncated.channels[0][0] === ramp[100] && truncated.channels[0][399] === ramp[499] && truncated.start === 0 && truncated.end === null && near(truncated.chops[0], 0.1, 1e-9) && near(truncated.chops[1], 0.2, 1e-9) && truncated.name === '0.4 s at 124 BPM' && truncated.bpm === 124,
+    JSON.stringify({ frames: truncated.channels[0].length, chops: truncated.chops, name: truncated.name })
+  );
+  check('Truncate leaves a name the user gave alone', truncateClip({ ...recorded, name: 'Amen break' }, 0.1, 0.5).name === 'Amen break' && truncateClip({ ...recorded, name: '1 bar at 90 BPM' }, 0, 0.25).name === '0.3 s at 90 BPM');
 
   const clicks = [0.1, 0.5, 0.8, 1.3];
   const clickData = new Float32Array(1.6 * RATE);
@@ -509,6 +527,34 @@ async function chopTests() {
   const later = segment(looped.l, 1.0, 1.25);
   check('A trimmed loop repeats only its region (restored from saved start/end)', tone(later, 440) > 0.4 && tone(later, 880) < 0.02, `440 Hz ${tone(later, 440).toFixed(3)}, 880 Hz ${tone(later, 880).toFixed(4)}`);
 
+  const heads = [];
+  await session({
+    seconds: 1,
+    signal: null,
+    setup: (e, ctx) => {
+      e.setQuantize('Off');
+      e.setPadClip(0, twoTone(ctx), { name: 'tones', bpm: BPM / 2, start: 0.25, end: 0.5 });
+      e.padPress(0);
+    },
+    at: [
+      [0.3, (e) => {
+        heads.push(e.transport().pads[0]);
+        e.setBpm(BPM / 2);
+      }],
+      [0.5, (e) => heads.push(e.transport().pads[0])],
+      [0.6, (e) => {
+        e.stopPad(0);
+        heads.push(e.transport().pads[0]);
+      }]
+    ]
+  });
+  const [synced, slowed, stopped] = heads;
+  check(
+    'The transport reports where a playing pad is, following tempo sync and wrapping at the loop end',
+    near(synced?.at, 0.35, 0.01) && synced?.rate === 2 && synced?.loop && near(slowed?.at, 0.3, 0.02) && slowed?.rate === 1 && stopped === undefined,
+    JSON.stringify(heads)
+  );
+
   const preview = await session({
     seconds: 1,
     signal: null,
@@ -518,6 +564,27 @@ async function chopTests() {
     }
   });
   check('Preview plays a slice once without marking the pad as playing', tone(segment(preview.l, 0.01, 0.19), 880) > 0.4 && rms(segment(preview.l, 0.25, 1)) < 1e-4 && !preview.engine.state.pads[3].playing, `880 Hz ${tone(segment(preview.l, 0.01, 0.19), 880).toFixed(3)}`);
+
+  const handover = await session({
+    seconds: 1,
+    signal: null,
+    setup: (e, ctx) => {
+      e.setQuantize('Off');
+      e.setPadClip(3, twoTone(ctx), { name: 'tones' });
+      e.padPress(3);
+    },
+    at: [
+      [0.3, (e) => e.preview(3, 0.5, 0.7)],
+      [0.6, (e) => e.padPress(3)]
+    ]
+  });
+  const previewing = segment(handover.l, 0.35, 0.45);
+  const repressed = segment(handover.l, 0.65, 0.75);
+  check(
+    'A pad has one voice: previewing stops the pad, and pressing the pad stops the preview',
+    tone(previewing, 880) > 0.4 && tone(previewing, 440) < 0.02 && tone(repressed, 440) > 0.4 && tone(repressed, 880) < 0.02,
+    `preview 880 ${tone(previewing, 880).toFixed(3)} / 440 ${tone(previewing, 440).toFixed(3)}, pad 440 ${tone(repressed, 440).toFixed(3)} / 880 ${tone(repressed, 880).toFixed(3)}`
+  );
 }
 
 async function chokeTests() {

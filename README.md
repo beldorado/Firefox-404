@@ -37,10 +37,10 @@ The panel opens on **Perform**, laid out like the hardware:
 - **Choke groups**: put pads in the same group (1–4) and starting one cuts off any other pad in that group, like an open and closed hi-hat. A quantized loop cuts the others on the beat it starts. The group shows on the pad as G1–G4.
 - **Pad tools**: load an audio file (or drop one onto a pad; the first 60 seconds are kept), export a pad as a 16-bit WAV, or clear it (click twice). Pads are kept between sessions.
 - **Edit / chop**: a waveform editor for the selected pad.
-  - Drag **S** and **E** to trim. This doesn't change the audio, Reset trim brings back the whole sample, and it's saved as you go.
-  - Add chops with Split evenly (2–16), Find hits (drum hits and note starts), a double-click, or by tapping **G** in time while it plays.
+  - Drag **S** and **E** to trim. This doesn't change the audio, Reset trim brings back the whole sample, and it's saved as you go. **Truncate** (click twice) cuts the sample down to S–E for good, keeping the pad's settings and chops.
+  - Add chops with Split evenly (2–16), Find hits (drum hits and note starts), a double-click, or by tapping **G** in time while it plays. The playhead follows the pad too, so you can play the pad in its own mode (Loop, Gate or One-shot) and chop along with it.
   - Shift+scroll zooms in and out around the mouse, and Alt+scroll zooms the amplitude so quiet parts are easier to chop. While zoomed in, hold the scroll wheel down and drag the waveform to move along it, or drag the bar under it (or scroll sideways on a trackpad). Shift+double-click resets the time zoom and Alt+double-click resets the amplitude. Shift and Alt clicks don't play or add chops.
-  - Click a slice to hear it. Drag a chop line to move it and double-click it to remove it. Chops snap to the 1/16 grid when the sample knows its BPM and Snap is on, and to the nearest zero crossing otherwise.
+  - Click a slice to hear it. Drag a chop line to move it and double-click it to remove it. Chops and trim points snap to the nearest zero crossing so slices start and end without a click. Turn off **Snap to zero crossings** to place them exactly.
   - **Send slices to pads** puts each slice on its own empty pad (the ones after the source, wrapping round to the start) as a One-shot with tiny fades at each edge.
 - **Sources**: each captured tab gets a level fader, a mute button, a route (Bus 1, Bus 2, or dry into Bus 3) and an In FX switch that sends it through Input FX first. Put sources on side A or B to mix them with the crossfader.
 
